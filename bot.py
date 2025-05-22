@@ -51,7 +51,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if post_data:
             # Пересылаем в канал/группу
             await context.bot.forward_message(
-                chat_id="graphyl",  # Замените на username канала
+                chat_id="Graphyl",  # Замените на username канала
                 from_chat_id=post_data["original_chat_id"],
                 message_id=post_data["original_message_id"]
             )
