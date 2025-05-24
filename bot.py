@@ -86,7 +86,8 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.CHAT_TYPE_PRIVATE & filters.ALL, handle_message))
+    # Исправленный фильтр:
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
 
     app.run_polling()
