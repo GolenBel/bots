@@ -1,9 +1,19 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
+from flask import Flask
+from threading import Thread
+import os
 
 TOKEN = "7901391418:AAGQvROcM7j1Oq1L3CtItn2ZwlDhxVL1wAI"
 ADMIN_ID = 495544662
 TARGET_CHAT_ID = "-1002645719218"  # Замените на реальный ID группы/канала
+
+# Создаем Flask сервер для Render
+server = Flask(__name__)
+
+@server.route('/')
+def home():
+    return "Telegram Bot is running", 200
 
 pending_posts = {}
 
@@ -11,7 +21,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Присылайте мемы/новости, я отправлю их на модерацию!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type == "private":  # Только из личных сообщений
+    if update.message.chat.type == "private":
         user = update.message.from_user
         chat_id = update.message.chat_id
         message_id = update.message.message_id
@@ -23,7 +33,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
-            # Формируем сообщение для админа с информацией об авторе
             admin_text = f"Новый контент на модерацию от @{user.username or user.first_name} (ID: {user.id})"
             
             if update.message.text:
@@ -31,14 +40,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif update.message.caption:
                 admin_text += f"\n\nПодпись: {update.message.caption}"
 
-            # Отправляем админу информацию о посте
             admin_msg = await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
                 reply_markup=reply_markup
             )
 
-            # Сохраняем все данные поста
             pending_posts[admin_msg.message_id] = {
                 "original_chat_id": chat_id,
                 "original_message_id": message_id,
@@ -69,12 +76,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         post_data = pending_posts.get(admin_msg_id)
         if post_data:
             try:
-                # Формируем текст поста с указанием автора
                 author = post_data["user"]
                 author_name = f"@{author['username']}" if author["username"] else author["first_name"]
                 post_text = f"{post_data['content']}\n\nАвтор: {author_name}"
 
-                # Отправляем контент в целевую группу
                 if post_data["photo"]:
                     await context.bot.send_photo(
                         chat_id=TARGET_CHAT_ID,
@@ -101,7 +106,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await query.edit_message_text("✅ Пост опубликован!")
                 
-                # Уведомляем автора
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
                     text="Ваш пост был одобрен и опубликован!"
@@ -122,14 +126,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if admin_msg_id in pending_posts:
         del pending_posts[admin_msg_id]
 
-def main():
-    app = Application.builder().token(TOKEN).build()
+def run_flask():
+    server.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
 
+def main():
+    # Запускаем Flask в отдельном потоке
+    Thread(target=run_flask).start()
+    
+    # Создаем и запускаем Telegram бота
+    app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
-
-    app.run_polling()
+    
+    try:
+        app.run_polling(drop_pending_updates=True)
+    except Exception as e:
+        print(f"Ошибка в боте: {e}")
 
 if __name__ == "__main__":
     main()
