@@ -133,3 +133,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+     try:
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            close_loop=False,  # Важно для Render!
+            drop_pending_updates=True  # Игнорировать старые сообщения
+        )
+    except telegram.error.Conflict:
+        print("Бот уже запущен. Render иногда создает дубликаты.")
+    except Exception as e:
+        print(f"Ошибка: {e}")
