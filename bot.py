@@ -1,19 +1,23 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
-from flask import Flask
 from threading import Thread
+import socket
 import os
 
 TOKEN = "7901391418:AAGQvROcM7j1Oq1L3CtItn2ZwlDhxVL1wAI"
 ADMIN_ID = 495544662
-TARGET_CHAT_ID = "-1002645719218"  # Замените на реальный ID группы/канала
+TARGET_CHAT_ID = "-1002645719218"
 
-# Создаем Flask сервер для Render
-server = Flask(__name__)
-
-@server.route('/')
-def home():
-    return "Telegram Bot is running", 200
+# Простой HTTP-сервер для удовлетворения требований Render
+def run_dummy_server():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('0.0.0.0', int(os.environ.get('PORT', 10000))))
+        s.listen()
+        while True:
+            conn, addr = s.accept()
+            conn.sendall(b"HTTP/1.1 200 OK\n\nBot is running")
+            conn.close()
 
 pending_posts = {}
 
@@ -126,12 +130,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if admin_msg_id in pending_posts:
         del pending_posts[admin_msg_id]
 
-def run_flask():
-    server.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
-
 def main():
-    # Запускаем Flask в отдельном потоке
-    Thread(target=run_flask).start()
+    # Запускаем простой HTTP-сервер в отдельном потоке
+    Thread(target=run_dummy_server, daemon=True).start()
     
     # Создаем и запускаем Telegram бота
     app = Application.builder().token(TOKEN).build()
@@ -140,7 +141,11 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     
     try:
-        app.run_polling(drop_pending_updates=True)
+        app.run_polling(
+            drop_pending_updates=True,
+            close_loop=False,
+            allowed_updates=Update.ALL_TYPES
+        )
     except Exception as e:
         print(f"Ошибка в боте: {e}")
 
