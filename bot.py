@@ -8,26 +8,17 @@ TARGET_CHAT_ID = "-1002645719218"  # Замените на реальный ID �
 pending_posts = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🎨 *Присылайте мемы/новости/обои!*\n\n"
-        "Я отправлю их на модерацию, а если они классные - опубликую для всех!\n\n"
-        "Есть что показать? Кидай сюда! 👇"
+    start_text = (
+        "Присылайте мемы/новости/обои, я отправлю их на модерацию!\n\n"
+        "Есть что показать? Кидай сюда 👇"
     )
-    await update.message.reply_text(welcome_text, parse_mode='Markdown')
+    await update.message.reply_text(start_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "private":
         user = update.message.from_user
         chat_id = update.message.chat_id
         message_id = update.message.message_id
-
-        # Красивое оформление сообщения для админа
-        admin_text = (
-            f"🎨 *Новый контент на модерации!*\n\n"
-            f"От: @{user.username or user.first_name}\n"
-            f"ID: {user.id}\n\n"
-            f"Что делаем с этим постом?"
-        )
 
         keyboard = [
             [InlineKeyboardButton("✅ Опубликовать", callback_data=f"approve_{chat_id}_{message_id}")],
@@ -43,12 +34,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_id=message_id
             )
             
-            # Отправляем красивое сообщение с кнопками
+            # Отправляем кнопки модерации
             admin_msg = await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=admin_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
+                text=f"Модерация поста от @{user.username or user.first_name}:",
+                reply_markup=reply_markup
             )
 
             pending_posts[admin_msg.message_id] = {
@@ -73,37 +63,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if post_data:
             user = post_data["user"]
             try:
-                # Красивое сообщение для публикации
-                publication_text = (
-                    "🎨 *Классные обои!*\n\n"
-                    "Есть что показать? Присылай в бота @вашбот\n\n"
-                    "Автор: @" + (user.username or user.first_name) + "\n"
-                    "#обои #дизайн"
-                )
+                # Форматируем сообщение как в вашем примере
 
-                # Если это фото/картинка
+                    f"Автор: @{user.username or user.first_name}"
+    
+
+                # Если это медиа-файл (фото/видео/документ)
                 if update.message.photo:
                     await context.bot.send_photo(
                         chat_id=TARGET_CHAT_ID,
                         photo=update.message.photo[-1].file_id,
-                        caption=publication_text,
-                        parse_mode='Markdown'
+                        caption=publication_text
                     )
-                # Если это текст
+                elif update.message.video:
+                    await context.bot.send_video(
+                        chat_id=TARGET_CHAT_ID,
+                        video=update.message.video.file_id,
+                        caption=publication_text
+                    )
                 else:
+                    # Если это просто текст
                     await context.bot.send_message(
                         chat_id=TARGET_CHAT_ID,
-                        text=publication_text,
-                        parse_mode='Markdown'
+                        text=publication_text
                     )
 
-                await query.edit_message_text("✅ Пост опубликован в стильном оформлении!")
+                await query.edit_message_text("✅ Пост опубликован в нужном формате!")
                 
                 # Уведомляем автора
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
-                    text="🎉 Твой пост был опубликован! Спасибо за классный контент!",
-                    parse_mode='Markdown'
+                    text="🎉 Твой пост был опубликован! Спасибо за контент!"
                 )
 
             except Exception as e:
@@ -114,8 +104,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if post_data:
             await context.bot.send_message(
                 chat_id=post_data["original_chat_id"],
-                text="😕 К сожалению, твой пост не прошел модерацию. Попробуй что-то другое!",
-                parse_mode='Markdown'
+                text="😕 К сожалению, твой пост не прошел модерацию."
             )
         await query.edit_message_text("❌ Пост отклонен.")
 
@@ -129,18 +118,14 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    app.run_polling()
+    try:
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            close_loop=False,
+            drop_pending_updates=True
+        )
+    except Exception as e:
+        print(f"Ошибка при запуске бота: {e}")
 
 if __name__ == "__main__":
     main()
-    
-     try:
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            close_loop=False,  # Важно для Render!
-            drop_pending_updates=True  # Игнорировать старые сообщения
-        )
-    except telegram.error.Conflict:
-        print("Бот уже запущен. Render иногда создает дубликаты.")
-    except Exception as e:
-        print(f"Ошибка: {e}")
