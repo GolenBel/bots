@@ -8,14 +8,10 @@ TARGET_CHAT_ID = "-1002645719218"  # Замените на реальный ID �
 pending_posts = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    start_text = (
-        "Присылайте мемы/новости/обои, я отправлю их на модерацию!\n\n"
-        "Есть что показать? Кидай сюда 👇"
-    )
-    await update.message.reply_text(start_text)
+    await update.message.reply_text("Присылайте мемы/новости, я отправлю их на модерацию!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type == "private":
+    if update.message.chat.type == "private":  # Только из личных сообщений
         user = update.message.from_user
         chat_id = update.message.chat_id
         message_id = update.message.message_id
@@ -27,29 +23,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
-            # Пересылаем оригинальное сообщение админу
-            await context.bot.forward_message(
-                chat_id=ADMIN_ID,
-                from_chat_id=chat_id,
-                message_id=message_id
-            )
+            # Формируем сообщение для админа с информацией об авторе
+            admin_text = f"Новый контент на модерацию от @{user.username or user.first_name} (ID: {user.id})"
             
-            # Отправляем кнопки модерации
+            if update.message.text:
+                admin_text += f"\n\nТекст: {update.message.text}"
+            elif update.message.caption:
+                admin_text += f"\n\nПодпись: {update.message.caption}"
+
+            # Отправляем админу информацию о посте
             admin_msg = await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"Модерация поста от @{user.username or user.first_name}:",
+                text=admin_text,
                 reply_markup=reply_markup
             )
 
+            # Сохраняем все данные поста
             pending_posts[admin_msg.message_id] = {
                 "original_chat_id": chat_id,
                 "original_message_id": message_id,
-                "original_content": update.message.text or update.message.caption or "",
-                "user": user
+                "content": update.message.text or update.message.caption or "",
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name
+                },
+                "photo": update.message.photo[-1].file_id if update.message.photo else None,
+                "video": update.message.video.file_id if update.message.video else None,
+                "document": update.message.document.file_id if update.message.document else None
             }
+
         except Exception as e:
-            print(f"Ошибка: {e}")
-            await update.message.reply_text("😕 Что-то пошло не так при отправке на модерацию...")
+            print(f"Ошибка при пересылке админу: {e}")
+            await update.message.reply_text("Произошла ошибка при отправке на модерацию.")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -61,50 +68,54 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("approve"):
         post_data = pending_posts.get(admin_msg_id)
         if post_data:
-            user = post_data["user"]
             try:
-                # Форматируем сообщение как в вашем примере
+                # Формируем текст поста с указанием автора
+                author = post_data["user"]
+                author_name = f"@{author['username']}" if author["username"] else author["first_name"]
+                post_text = f"{post_data['content']}\n\nАвтор: {author_name}"
 
-                    f"Автор: @{user.username or user.first_name}"
-    
-
-                # Если это медиа-файл (фото/видео/документ)
-                if update.message.photo:
+                # Отправляем контент в целевую группу
+                if post_data["photo"]:
                     await context.bot.send_photo(
                         chat_id=TARGET_CHAT_ID,
-                        photo=update.message.photo[-1].file_id,
-                        caption=publication_text
+                        photo=post_data["photo"],
+                        caption=post_text
                     )
-                elif update.message.video:
+                elif post_data["video"]:
                     await context.bot.send_video(
                         chat_id=TARGET_CHAT_ID,
-                        video=update.message.video.file_id,
-                        caption=publication_text
+                        video=post_data["video"],
+                        caption=post_text
+                    )
+                elif post_data["document"]:
+                    await context.bot.send_document(
+                        chat_id=TARGET_CHAT_ID,
+                        document=post_data["document"],
+                        caption=post_text
                     )
                 else:
-                    # Если это просто текст
                     await context.bot.send_message(
                         chat_id=TARGET_CHAT_ID,
-                        text=publication_text
+                        text=post_text
                     )
 
-                await query.edit_message_text("✅ Пост опубликован в нужном формате!")
+                await query.edit_message_text("✅ Пост опубликован!")
                 
                 # Уведомляем автора
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
-                    text="🎉 Твой пост был опубликован! Спасибо за контент!"
+                    text="Ваш пост был одобрен и опубликован!"
                 )
 
             except Exception as e:
-                print(f"Ошибка публикации: {e}")
-                await query.edit_message_text("❌ Не удалось опубликовать пост.")
+                print(f"Ошибка при публикации: {e}")
+                await query.edit_message_text("❌ Ошибка при публикации поста.")
     elif data.startswith("reject"):
         post_data = pending_posts.get(admin_msg_id)
         if post_data:
             await context.bot.send_message(
                 chat_id=post_data["original_chat_id"],
-                text="😕 К сожалению, твой пост не прошел модерацию."
+                text="Ваш пост был отклонен модератором."
             )
         await query.edit_message_text("❌ Пост отклонен.")
 
@@ -118,14 +129,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    try:
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            close_loop=False,
-            drop_pending_updates=True
-        )
-    except Exception as e:
-        print(f"Ошибка при запуске бота: {e}")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
