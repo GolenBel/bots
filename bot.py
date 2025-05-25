@@ -22,7 +22,6 @@ def run_dummy_server():
 pending_posts = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Центрированное сообщение без рекламы
     start_message = """
     <b>Ну давай давай нападай!</b>
     
