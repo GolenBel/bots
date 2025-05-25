@@ -8,7 +8,6 @@ TOKEN = "7901391418:AAGQvROcM7j1Oq1L3CtItn2ZwlDhxVL1wAI"
 ADMIN_ID = 495544662
 TARGET_CHAT_ID = "-1002645719218"
 
-# HTTP-сервер для Render
 def run_dummy_server():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -16,15 +15,20 @@ def run_dummy_server():
         s.listen()
         while True:
             conn, addr = s.accept()
-            conn.sendall(b"HTTP/1.1 200 OK\n\nBot is running")
+            response = (
+                "HTTP/1.1 200 OK\n"
+                "Content-Type: text/plain; charset=utf-8\n\n"
+                "Content Moderation Bot is running"
+            )
+            conn.sendall(response.encode('utf-8'))
             conn.close()
 
 pending_posts = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_message = """
-    <b>Ну давай давай нападай!</b>
-    
+    <b>Ну давай давай нападай!</b> 
+
     Присылай мемы, новости, крутые находки!
     Я отправлю их на модерацию.
     """
@@ -43,14 +47,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
-            # Пересылаем оригинальное сообщение админу
             forwarded_msg = await context.bot.forward_message(
                 chat_id=ADMIN_ID,
                 from_chat_id=chat_id,
                 message_id=message_id
             )
             
-            # Отправляем кнопки модерации
             admin_msg = await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=f"Модерация контента от @{user.username or user.first_name}:",
@@ -92,46 +94,37 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 author = post_data["user"]
                 author_name = f"@{author['username']}" if author["username"] else author["first_name"]
                 
-                # Форматирование поста
-                post_text = f"""
+                post_text = f"{post_data['content']}\n\nАвтор: {author_name}"
                 
-                {post_data['content']}
-                
-                Автор: {author_name}
-                """
-                
-                # Отправка контента
                 if post_data["photo"]:
-                    sent_msg = await context.bot.send_photo(
+                    await context.bot.send_photo(
                         chat_id=TARGET_CHAT_ID,
                         photo=post_data["photo"],
                         caption=post_text,
                         parse_mode='HTML'
                     )
                 elif post_data["video"]:
-                    sent_msg = await context.bot.send_video(
+                    await context.bot.send_video(
                         chat_id=TARGET_CHAT_ID,
                         video=post_data["video"],
                         caption=post_text,
                         parse_mode='HTML'
                     )
                 elif post_data["document"]:
-                    sent_msg = await context.bot.send_document(
+                    await context.bot.send_document(
                         chat_id=TARGET_CHAT_ID,
                         document=post_data["document"],
                         caption=post_text,
                         parse_mode='HTML'
                     )
                 else:
-                    sent_msg = await context.bot.send_message(
+                    await context.bot.send_message(
                         chat_id=TARGET_CHAT_ID,
                         text=post_text,
                         parse_mode='HTML'
                     )
 
                 await query.edit_message_text("✅ Пост опубликован!")
-                
-                # Уведомление автору
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
                     text="<b>Твой контент опубликован!</b>",
@@ -152,27 +145,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await query.edit_message_text("❌ Пост отклонен")
 
-    # Удаляем из временного хранилища
     if admin_msg_id in pending_posts:
         del pending_posts[admin_msg_id]
 
 def main():
-    # Запуск HTTP-сервера
     Thread(target=run_dummy_server, daemon=True).start()
-    
-    # Настройка бота
     app = Application.builder().token(TOKEN).build()
     
-    # Обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     
-    # Запуск
     try:
         app.run_polling(
             drop_pending_updates=True,
-            close_loop=False,
             allowed_updates=Update.ALL_TYPES
         )
     except Exception as e:
