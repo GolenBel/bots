@@ -164,7 +164,7 @@ def webhook():
 
 def set_webhook():
     # URL твоего Render-приложения (замени на свой)
-    webhook_url = "https://your-bot-name.onrender.com/webhook"
+    webhook_url = "https://bots-amfj.onrender.com/webhook"
     application.bot.set_webhook(url=webhook_url)
     logger.info(f"Webhook установлен: {webhook_url}")
 
