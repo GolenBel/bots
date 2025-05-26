@@ -1,28 +1,32 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
-from threading import Thread
-import socket
+from flask import Flask, request, jsonify
 import os
+import logging
 
-TOKEN = "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4"
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Конфигурация
+TOKEN = "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4"  # Замени на свой токен!
 ADMIN_ID = 495544662
 TARGET_CHAT_ID = "-1002645719218"
 
-# HTTP-сервер для Render
-def run_dummy_server():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(('0.0.0.0', int(os.environ.get('PORT', 10000))))
-        s.listen()
-        while True:
-            conn, addr = s.accept()
-            conn.sendall(b"HTTP/1.1 200 OK\n\nBot is running")
-            conn.close()
+# Инициализация Flask
+app = Flask(__name__)
 
+# Глобальное хранилище для постов на модерации
 pending_posts = {}
 
+# Инициализация бота
+application = Application.builder().token(TOKEN).build()
+
+### --- Обработчики команд --- ###
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Центрированное сообщение без рекламы
     start_message = """
     <b>Ну давай давай нападай!</b>
     
@@ -44,14 +48,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
-            # Пересылаем оригинальное сообщение админу
             forwarded_msg = await context.bot.forward_message(
                 chat_id=ADMIN_ID,
                 from_chat_id=chat_id,
                 message_id=message_id
             )
             
-            # Отправляем кнопки модерации
             admin_msg = await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=f"Модерация контента от @{user.username or user.first_name}:",
@@ -76,7 +78,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
         except Exception as e:
-            print(f"Ошибка при пересылке админу: {e}")
+            logger.error(f"Ошибка при пересылке админу: {e}")
             await update.message.reply_text("Ошибка при отправке на модерацию")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,15 +95,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 author = post_data["user"]
                 author_name = f"@{author['username']}" if author["username"] else author["first_name"]
                 
-                # Форматирование поста
-                post_text = f"""
+                post_text = f"\n\n{post_data['content']}\n\nАвтор: {author_name}"
                 
-                {post_data['content']}
-                
-                Автор: {author_name}
-                """
-                
-                # Отправка контента
                 if post_data["photo"]:
                     sent_msg = await context.bot.send_photo(
                         chat_id=TARGET_CHAT_ID,
@@ -131,8 +126,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
 
                 await query.edit_message_text("✅ Пост опубликован!")
-                
-                # Уведомление автору
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
                     text="<b>Твой контент опубликован!</b>",
@@ -140,7 +133,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
             except Exception as e:
-                print(f"Ошибка публикации: {e}")
+                logger.error(f"Ошибка публикации: {e}")
                 await query.edit_message_text("❌ Ошибка при публикации")
                 
     elif data.startswith("reject"):
@@ -153,31 +146,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await query.edit_message_text("❌ Пост отклонен")
 
-    # Удаляем из временного хранилища
     if admin_msg_id in pending_posts:
         del pending_posts[admin_msg_id]
 
-def main():
-    # Запуск HTTP-сервера
-    Thread(target=run_dummy_server, daemon=True).start()
-    
-    # Настройка бота
-    app = Application.builder().token(TOKEN).build()
-    
-    # Обработчики
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
-    app.add_handler(CallbackQueryHandler(button_callback))
-    
-    # Запуск
-    try:
-        app.run_polling(
-            drop_pending_updates=True,
-            close_loop=False,
-            allowed_updates=Update.ALL_TYPES
-        )
-    except Exception as e:
-        print(f"Ошибка бота: {e}")
+### --- Webhook часть --- ###
+@app.route('/')
+def home():
+    return "Бот работает!"
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        update = Update.de_json(request.get_json(), application.bot)
+        application.process_update(update)
+        return jsonify(success=True)
+    return jsonify(success=False), 403
+
+def set_webhook():
+    # URL твоего Render-приложения (замени на свой)
+    webhook_url = "https://your-bot-name.onrender.com/webhook"
+    application.bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook установлен: {webhook_url}")
+
+### --- Запуск --- ###
 if __name__ == "__main__":
-    main()
+    # Регистрация обработчиков
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
+    application.add_handler(CallbackQueryHandler(button_callback))
+
+    # Установка webhook при старте
+    set_webhook()
+
+    # Запуск Flask-сервера
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
