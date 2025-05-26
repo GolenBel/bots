@@ -3,77 +3,26 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from threading import Thread
 import socket
 import os
-import time
-import asyncio
-import logging
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-TOKEN = "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4"
+TOKEN = "7901391418:AAGQvROcM7j1Oq1L3CtItn2ZwlDhxVL1wAI"
 ADMIN_ID = 495544662
 TARGET_CHAT_ID = "-1002645719218"
 
-# Интервал для ping-сообщений (в секундах)
-PING_INTERVAL = 300  # 5 минут
+# Простой HTTP-сервер для Render
+def run_dummy_server():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('0.0.0.0', int(os.environ.get('PORT', 10000))))
+        s.listen()
+        while True:
+            conn, addr = s.accept()
+            conn.sendall(b"HTTP/1.1 200 OK\n\nBot is running")
+            conn.close()
 
 pending_posts = {}
 
-class BotPinger:
-    def __init__(self, app):
-        self.app = app
-        self.is_running = True
-        
-    async def start_pinging(self):
-        while self.is_running:
-            try:
-                # Получаем информацию о боте для проверки работы
-                bot_info = await self.app.bot.get_me()
-                logger.info(f"Bot ping successful: @{bot_info.username} is alive")
-                
-                # Отправляем ping в лог-чат (можно заменить на реальный чат)
-                await self.app.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text="🤖 Бот активен и работает!",
-                    disable_notification=True
-                )
-            except Exception as e:
-                logger.error(f"Ping failed: {e}")
-            
-            await asyncio.sleep(PING_INTERVAL)
-
-    def stop_pinging(self):
-        self.is_running = False
-
-# Простой HTTP-сервер для Render с улучшенной обработкой
-def run_dummy_server():
-    while True:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(('0.0.0.0', int(os.environ.get('PORT', 10000))))
-                s.listen()
-                s.settimeout(5)  # Таймаут для периодической проверки is_running
-                
-                while True:
-                    try:
-                        conn, addr = s.accept()
-                        conn.sendall(b"HTTP/1.1 200 OK\n\nBot is running")
-                        conn.close()
-                    except socket.timeout:
-                        continue
-                    except Exception as e:
-                        logger.error(f"Server error: {e}")
-                        break
-        except Exception as e:
-            logger.error(f"Server crashed: {e}, restarting in 10 seconds...")
-            time.sleep(10)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Яркое стартовое сообщение без рекламы
     await update.message.reply_text(
         "Ну давай давай нападай!\n\n"
         "Кидай сюда свой контент - мемы, новости, крутые находки!\n"
@@ -139,7 +88,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
         except Exception as e:
-            logger.error(f"Ошибка при пересылке админу: {e}")
+            print(f"Ошибка при пересылке админу: {e}")
             await update.message.reply_text("Ой, что-то пошло не так... Попробуй еще раз!")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -163,11 +112,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 author = post_data["user"]
                 author_name = f"@{author['username']}" if author["username"] else author["first_name"]
                 
+                # Яркое оформление поста
                 post_text = (
-                    "Ну давай давай нападай!\n\n"
                     f"{post_data['content']}\n\n"
                     f"Автор: {author_name}\n"
-                    "#круто #контент"
                 )
 
                 if post_data["photo"]:
@@ -196,6 +144,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await query.edit_message_text("✅ Опубликовано с крутым призывом!")
                 
+                # Яркое уведомление автору
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
                     text="Твой контент взлетел в канал! Так держать!",
@@ -205,7 +154,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
             except Exception as e:
-                logger.error(f"Ошибка при публикации: {e}")
+                print(f"Ошибка при публикации: {e}")
                 await query.edit_message_text("❌ Не удалось опубликовать")
     elif data.startswith("reject"):
         post_data = pending_posts.get(admin_msg_id)
@@ -219,65 +168,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if admin_msg_id in pending_posts:
         del pending_posts[admin_msg_id]
 
-async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(f"Update {update} caused error: {context.error}")
-    
-    # Попытка отправить сообщение об ошибке админу
-    try:
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"⚠️ Произошла ошибка: {context.error}"
-        )
-    except Exception as e:
-        logger.error(f"Не удалось отправить сообщение об ошибке: {e}")
-
 def main():
-    # Запускаем HTTP-сервер в отдельном потоке
-    server_thread = Thread(target=run_dummy_server, daemon=True)
-    server_thread.start()
+    # Запускаем HTTP-сервер
+    Thread(target=run_dummy_server, daemon=True).start()
     
-    # Настраиваем бота с обработкой ошибок
+    # Настраиваем бота
     app = Application.builder().token(TOKEN).build()
-    app.add_error_handler(on_error)
     
     # Обработчики
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     
-    # Система ping для поддержания активности
-    pinger = BotPinger(app)
-    
-    async def run_bot():
-        # Запускаем ping-систему
-        asyncio.create_task(pinger.start_pinging())
-        
-        # Запускаем бота с автоматическим переподключением
-        while True:
-            try:
-                await app.initialize()
-                await app.start()
-                await app.updater.start_polling(
-                    drop_pending_updates=True,
-                    allowed_updates=Update.ALL_TYPES
-                )
-                
-                logger.info("Bot started successfully")
-                await asyncio.sleep(86400)  # Засыпаем на 1 день
-                
-            except Exception as e:
-                logger.error(f"Bot crashed: {e}, restarting in 10 seconds...")
-                await asyncio.sleep(10)
-            finally:
-                try:
-                    await app.updater.stop()
-                    await app.stop()
-                    await app.shutdown()
-                except:
-                    pass
-    
-    # Запускаем основную петлю
-    asyncio.run(run_bot())
+    # Запуск
+    try:
+        app.run_polling(
+            drop_pending_updates=True,
+            close_loop=False,
+            allowed_updates=Update.ALL_TYPES
+        )
+    except Exception as e:
+        print(f"Ошибка бота: {e}")
 
 if __name__ == "__main__":
     main()
