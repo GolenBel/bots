@@ -12,21 +12,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-TOKEN = "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4"  # Замени на свой токен!
+TOKEN = os.getenv('TOKEN', "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4")
 ADMIN_ID = 495544662
 TARGET_CHAT_ID = "-1002645719218"
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', "https://your-render-url.onrender.com")
 
-# Инициализация Flask
-app = Flask(__name__)
-
-# Глобальное хранилище для постов на модерации
+# Инициализация
 pending_posts = {}
-
-# Инициализация бота
 application = Application.builder().token(TOKEN).build()
+flask_app = Flask(__name__)
 
-### --- Обработчики команд --- ###
+### Обработчики команд (остаются без изменений) ###
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Ну давай давай нападай! Присылай контент!")
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_message = """
     <b>Ну давай давай нападай!</b>
     
@@ -35,7 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     await update.message.reply_text(start_message, parse_mode='HTML')
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "private":
         user = update.message.from_user
         chat_id = update.message.chat_id
@@ -150,34 +150,44 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del pending_posts[admin_msg_id]
 
 ### --- Webhook часть --- ###
-@app.route('/')
+@flask_app.route('/')
 def home():
-    return "Бот работает!"
+    return "Бот работает!", 200
 
-@app.route('/webhook', methods=['POST'])
+@flask_app.route('/webhook', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
         update = Update.de_json(request.get_json(), application.bot)
         application.process_update(update)
-        return jsonify(success=True)
+        return jsonify(success=True), 200
     return jsonify(success=False), 403
 
-def set_webhook():
-    # URL твоего Render-приложения (замени на свой)
-    webhook_url = "https://bots-amfj.onrender.com/webhook"
-    application.bot.set_webhook(url=webhook_url)
-    logger.info(f"Webhook установлен: {webhook_url}")
+async def set_webhook():
+    await application.bot.set_webhook(
+        url=f"{WEBHOOK_URL}/webhook",
+        drop_pending_updates=True
+    )
+    logger.info(f"Webhook установлен на {WEBHOOK_URL}")
 
-### --- Запуск --- ###
-if __name__ == "__main__":
-    # Регистрация обработчиков
+### Инициализация ###
+def setup_handlers():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
 
+def run():
+    setup_handlers()
+    
     # Установка webhook при старте
-    set_webhook()
+    application.run_polling()  # Временное решение для отладки
+    
+    # Для production используйте это:
+    # application.run_webhook(
+    #     listen="0.0.0.0",
+    #     port=int(os.getenv('PORT', 5000)),
+    #     webhook_url=f"{WEBHOOK_URL}/webhook",
+    #     secret_token='YOUR_SECRET_TOKEN'
+    # )
 
-    # Запуск Flask-сервера
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    run()
