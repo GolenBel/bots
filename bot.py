@@ -14,7 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TOKEN = "7901391418:AAGQvROcM7j1Oq1L3CtItn2ZwlDhxVL1wAI"
+TOKEN = "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4"
 ADMIN_ID = 495544662
 TARGET_CHAT_ID = "-1002645719218"
 
