@@ -3,6 +3,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from threading import Thread
 import socket
 import os
+import logging
+
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 TOKEN = "7901391418:AAGVw38YRgxBTj-jvU9Ya3QS_9Q466Og1O4"
 ADMIN_ID = 495544662
@@ -92,19 +100,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pending_posts[admin_msg.message_id] = post_data
 
         except Exception as e:
-            print(f"Ошибка при пересылке админу: {e}")
+            logger.error(f"Ошибка при пересылке админу: {e}")
             await update.message.reply_text("Произошла ошибка при отправке на модерацию.")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    data = query.data
-    admin_msg_id = query.message.message_id
+    try:
+        data = query.data
+        admin_msg_id = query.message.message_id
 
-    if data.startswith("approve"):
         post_data = pending_posts.get(admin_msg_id)
-        if post_data:
+        if not post_data:
+            return
+
+        if data.startswith("approve"):
             try:
                 author = post_data["user"]
                 author_name = f"@{author['username']}" if author["username"] else author["first_name"]
@@ -134,27 +145,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         text=post_text
                     )
 
-                await query.edit_message_text("✅ Пост опубликован!")
-                
+                # Обновляем сообщение с учетом типа контента
+                try:
+                    if query.message.text:
+                        await query.edit_message_text("✅ Пост опубликован!")
+                    elif query.message.caption:
+                        await query.message.edit_caption(caption="✅ Пост опубликован!")
+                except Exception as e:
+                    logger.error(f"Ошибка при редактировании сообщения: {e}")
+
                 await context.bot.send_message(
                     chat_id=post_data["original_chat_id"],
                     text="Ваш пост был одобрен и опубликован!"
                 )
 
             except Exception as e:
-                print(f"Ошибка при публикации: {e}")
-                await query.edit_message_text("❌ Ошибка при публикации поста.")
-    elif data.startswith("reject"):
-        post_data = pending_posts.get(admin_msg_id)
-        if post_data:
+                logger.error(f"Ошибка при публикации: {e}")
+                try:
+                    if query.message.text:
+                        await query.edit_message_text("❌ Ошибка при публикации поста.")
+                    elif query.message.caption:
+                        await query.message.edit_caption(caption="❌ Ошибка при публикации поста.")
+                except Exception as edit_error:
+                    logger.error(f"Ошибка при редактировании сообщения: {edit_error}")
+        
+        elif data.startswith("reject"):
             await context.bot.send_message(
                 chat_id=post_data["original_chat_id"],
                 text="Ваш пост был отклонен модератором."
             )
-        await query.edit_message_text("❌ Пост отклонен.")
+            try:
+                if query.message.text:
+                    await query.edit_message_text("❌ Пост отклонен.")
+                elif query.message.caption:
+                    await query.message.edit_caption(caption="❌ Пост отклонен.")
+            except Exception as e:
+                logger.error(f"Ошибка при редактировании сообщения: {e}")
 
-    if admin_msg_id in pending_posts:
-        del pending_posts[admin_msg_id]
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике callback: {e}")
+    finally:
+        if admin_msg_id in pending_posts:
+            del pending_posts[admin_msg_id]
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Ошибка: {context.error}", exc_info=context.error)
 
 def main():
     # Запускаем простой HTTP-сервер в отдельном потоке
@@ -165,15 +200,16 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
+    app.add_error_handler(error_handler)
     
     try:
         app.run_polling(
             drop_pending_updates=True,
-            close_loop=False,
+            close_loop=True,
             allowed_updates=Update.ALL_TYPES
         )
     except Exception as e:
-        print(f"Ошибка в боте: {e}")
+        logger.error(f"Ошибка в боте: {e}")
 
 if __name__ == "__main__":
     main()
